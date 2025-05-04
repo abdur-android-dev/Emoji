@@ -51,6 +51,14 @@ import com.vanniktech.ui.Color
 import com.vanniktech.ui.themeViewPager
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.LayoutInflater
+import android.widget.EditText
+import androidx.core.widget.addTextChangedListener
+import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.vanniktech.emoji.search.SearchEmojiManager
 
 class EmojiView @JvmOverloads constructor(
   context: Context,
@@ -67,6 +75,9 @@ class EmojiView @JvmOverloads constructor(
   private lateinit var recentEmoji: RecentEmoji
   private lateinit var searchEmoji: SearchEmoji
   private lateinit var variantEmoji: VariantEmoji
+  private var inlineSearchContainer: View? = null
+  private var inlineSearchEditText: EditText? = null
+  private val inlineSearchEngine by lazy { SearchEmojiManager() }
 
   init {
     inflate(context, R.layout.emoji_view, this)
@@ -178,20 +189,7 @@ class EmojiView @JvmOverloads constructor(
     if (searchIndex != null) {
       emojiTabs[searchIndex] = inflateButton(context, R.drawable.emoji_search, context.getString(R.string.emoji_search), emojisTab)
       emojiTabs[searchIndex]!!.setOnClickListener {
-        editText?.hideKeyboardAndFocus()
-
-        EmojiSearchDialog.show(
-          getContext(),
-          {
-            handleEmojiClick(it, addWhitespace = true)
-            editText?.showKeyboardAndFocus()
-
-            // Maybe the search was opened from the recent tab and hence we'll invalidate.
-            emojiPagerAdapter.invalidateRecentEmojis()
-          },
-          searchEmoji,
-          theming,
-        )
+        toggleInlineSearchBar()
       }
     }
     if (backspaceIndex != null) {
@@ -208,6 +206,52 @@ class EmojiView @JvmOverloads constructor(
       emojiTabs[i]?.setOnClickListener(EmojiTabsClickListener(emojisPager, i))
     }
   }
+  
+  private fun toggleInlineSearchBar() {
+  val parent = this  // EmojiView is a ViewGroup
+
+  if (inlineSearchContainer == null) {
+    // Inflate the library’s inline‐search layout
+    inlineSearchContainer = LayoutInflater.from(context)
+      .inflate(R.layout.emoji_view_search_inline, parent, false)
+
+    // Grab its EditText and Results RecyclerView
+    inlineSearchEditText = inlineSearchContainer!!
+      .findViewById<EditText>(R.id.inlineEmojiSearchEditText)
+    val rv = inlineSearchContainer!!
+      .findViewById<RecyclerView>(R.id.emoji_view_search_inline_results)
+      .apply {
+        layoutManager = GridLayoutManager(context, 6)
+        adapter = EmojiSearchAdapter { emoji ->
+          // Commit emojis directly from inline results
+          editText?.commitText(emoji.unicode, 1)
+          // Clear the search field after pick
+          inlineSearchEditText?.setText("")
+        }
+      }
+
+    // Hook up text changes to filter results
+    inlineSearchEditText?.addTextChangedListener { text: Editable? ->
+      val query = text?.toString()?.trim().orEmpty()
+      val results = if (query.isEmpty()) emptyList()
+                    else inlineSearchEngine.search(query).map { it.emoji }
+      (rv.adapter as EmojiSearchAdapter).submitList(results)
+    }
+
+    // Finally, insert the search bar at the very top of this view
+    parent.addView(
+      inlineSearchContainer,
+      0,
+      LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+    )
+  } else {
+    // Already visible → remove it
+    parent.removeView(inlineSearchContainer)
+    inlineSearchContainer = null
+    inlineSearchEditText = null
+  }
+}
+
 
   private fun inflateButton(
     context: Context,
